@@ -72,7 +72,7 @@ Options:
   -s, --script PATH       Groovy script path (with or without .groovy)
   -A, --api URL           Override API endpoint (default: metais-test URL)
       --params PATH       Parameters JSON file (default: params.json)
-      --no-csv            Skip ./convert.sh
+      --no-csv            Skip conversion from json to csv
 
   -h, -H, --help          Show this help
 
@@ -80,8 +80,7 @@ Env:
   TOKEN                   Bearer token (required)
 
 Notes:
-- Run the script from the main directory: run/run.sh
-- Chmod +x run/run.sh run/core.sh run/lib.sh
+- Run the script from the repo directory: $ run/run.sh
 - If page/per-page are omitted, they are not sent in JSON.
 - OUT_JSON is used for the raw API response; OUT_CSV is the convert target.
 EOF

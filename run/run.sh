@@ -49,6 +49,14 @@ SCRIPT_PATH="$(ensure_groovy_ext "$SCRIPT_PATH")"
 
 mkdir -p "$OUTDIR"   # ensure output dir exists
 
+# --- derive default output name from script if not explicitly set ---
+if [[ -z "${OUTPUT_BASE:-}" || "$OUTPUT_BASE" == "output" ]]; then
+  # Extract filename from script path (strip dir and .groovy)
+  script_basename="$(basename "$SCRIPT_PATH")"
+  script_name="${script_basename%.groovy}"
+  OUTPUT_BASE="$script_name"
+fi
+
 compute_outputs "$OUTPUT_BASE"
 # Prepend OUTDIR to all computed files
 OUT_JSON="${OUTDIR}/$(basename "$OUT_JSON")"
