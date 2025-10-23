@@ -1,5 +1,5 @@
 def qi_node  = qi("node")
-def type_node = type("KS")
+def type_node = type("AS")
 
 def q = match(path().node(qi_node, type_node))
   .where(not(qi_node.filter(state(StateEnum.INVALIDATED))))

@@ -39,17 +39,24 @@ jq -n \
     | del(.perPage| select(.==null))
   ' > "$_payload"
 
-# Call API capturing both status and body
+# build cURL flags
 _resp_tmp="$(mktemp)"
-http_code="$(
-  curl -sS \
-    -X POST "$APIURI" \
-    -H "Authorization: Bearer $TOKEN" \
-    -H "Content-Type: application/json" \
-    --data @"$_payload" \
-    -o "$_resp_tmp" \
-    -w '%{http_code}'
-)"
+curl_flags=(
+  -sS
+  -X POST "$APIURI"
+  -H "Authorization: Bearer $TOKEN"
+  -H "Content-Type: application/json"
+  --data @"$_payload"
+  -o "$_resp_tmp"
+  -w '%{http_code}'
+)
+
+# Add -k/--insecure if requested
+if [[ "${RUN_INSECURE:-0}" -eq 1 ]]; then
+  curl_flags+=(-k)
+fi
+
+http_code="$(curl "${curl_flags[@]}")"
 
 # Evaluate result
 if [[ "$http_code" == "200" ]]; then

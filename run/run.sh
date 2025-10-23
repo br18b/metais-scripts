@@ -13,6 +13,7 @@ PARAMS_PATH="params/params.json"
 OUTDIR="$(dirname "$SCRIPT_DIR")/output" # default ../output
 RUN_CONVERT=1
 APIURI="$APIURI_DEFAULT"
+RUN_INSECURE=0
 
 PAGE_SET=0; PERPAGE_SET=0
 PAGE_VAL=""; PERPAGE_VAL=""
@@ -28,6 +29,7 @@ while (( "$#" )); do
       SCRIPT_PATH="$(resolve_groovy_path "${2:-}")"
       shift 2 ;;
     -A|--api)      APIURI="${2:-}"; shift 2 ;;
+    -k|--insecure) RUN_INSECURE=1; shift ;;
     --params)      PARAMS_PATH="${2:-}"; shift 2 ;;
     --no-csv)      RUN_CONVERT=0; shift ;;
     -h|-H|--help)  print_help; exit 0 ;;
@@ -45,7 +47,7 @@ OUTDIR="$(expand_tilde "$OUTDIR")"
 
 SCRIPT_PATH="$(ensure_groovy_ext "$SCRIPT_PATH")"
 [[ -f "$SCRIPT_PATH" ]] || { echo "Script not found: $SCRIPT_PATH"; exit 1; }
-[[ -f "$PARAMS_PATH" ]] || { echo "Params not found: $PARAMS_PATH"; exit 1; }
+[[ -e "$PARAMS_PATH" ]] || { echo "Params not found: $PARAMS_PATH"; exit 1; }
 
 mkdir -p "$OUTDIR"   # ensure output dir exists
 
@@ -65,7 +67,7 @@ OUT_CSV="${OUTDIR}/$(basename "$OUT_CSV")"
 normalize_paging "$PAGE_SET" "$PAGE_VAL" "$PERPAGE_SET" "$PERPAGE_VAL"
 
 # --- export contract for core.sh ---
-export APIURI SCRIPT_PATH PARAMS_PATH OUT_JSON PAGE_JSON PERPAGE_JSON TOKEN
+export APIURI SCRIPT_PATH PARAMS_PATH OUT_JSON PAGE_JSON PERPAGE_JSON TOKEN RUN_INSECURE
 
 # --- run core ---
 "${SCRIPT_DIR}/core.sh"
