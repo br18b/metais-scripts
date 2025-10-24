@@ -6,13 +6,22 @@ from collections import Counter
 from typing import Dict, List, Tuple, Any, Optional, Set
 
 # --------------------------------------- Utilities ---------------------------------------
-# files can be loaded either as filename, in which case it defaults to output/filename.json
-# or if it contains .json at the end, then take it at face value
-# ex: KS_raw resolves to output/KS_raw.json, foo/bar.json resolves to foo/bar.json
+# Resolve a token to a JSON file path under output/. Supports:
+# - "KS_raw"  -> "output/KS_raw.json"
+# - "KS"      -> "output/KS_raw.json"
+# - "output/KS_raw.json" (already a JSON path) -> unchanged
 def resolve_path(token: str) -> str:
-    # Resolve 'KS_raw' -> 'output/KS_raw.json' if no extension; else return as-is.
+    token = token.strip()
+
+    # If it's already a .json path (absolute or relative), return as-is
     if token.lower().endswith(".json"):
         return token
+
+    # If user just wrote "KS", automatically interpret it as "KS_raw"
+    if "_" not in token:     # e.g. no underscore — such as "KS", "PO", "AS"
+        token = f"{token}_raw"
+
+    # Map to "output/<token>.json"
     return os.path.join("output", f"{token}.json")
 
 def load_json(path: str) -> Any:
@@ -88,20 +97,16 @@ def build_uuid_index(raw_doc: Any) -> Dict[str, Dict[str, Any]]:
 #    Parse a relation TABLE JSON where each row ties an entry in the central dataset to
 #    an entry in an endpoint dataset.
 #
-#    Expected structure of the JSON:
+#    Expected structure:
 #    {
 #      "type": "TABLE",
-#      "page": ...,
-#      "perPage": ...,
-#      "totalCount": ...,
 #      "result": {
 #        "headers": [
-#          {"name": "<central>_uuid",   "type": "STRING"},
-#          {"name": "<endpoint>_uuid",  "type": "STRING"}
+#          {"name": "central_uuid", "type": "STRING"},
+#          {"name": "outer_uuid",   "type": "STRING"}
 #        ],
 #        "rows": [
-#          { "values": ["central-uuid-1", "endpoint-uuid-1"] },
-#          { "values": ["central-uuid-2", "endpoint-uuid-2"] },
+#          {"values": ["<central-uuid>", "<outer-uuid>"]},
 #          ...
 #        ]
 #      }
