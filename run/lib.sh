@@ -67,21 +67,26 @@ Usage: run.sh [options]
 
 Options:
   -o, --output NAME       Output name/path for JSON (with or without .json).
-  -p, --page N            Page number (omit to exclude from payload)
-  -P, --per-page N        Page size (omit to exclude from payload)
-  -s, --script PATH       Groovy script path (with or without .groovy)
-  -A, --api URL           Override API endpoint (default: metais-test URL)
-      --params PATH       Parameters JSON file (default: params.json)
-      --no-csv            Skip conversion from json to csv
-
-  -h, -H, --help          Show this help
+  -d, --outdir DIR        Directory to write outputs (default: ../output).
+  -p, --page N            Page number (omit to exclude from payload).
+  -P, --per-page N        Page size (omit to exclude from payload).
+  -s, --script PATH       Groovy script path (with or without .groovy).
+                          (Optional if SCRIPT_CONTENT is provided.)
+  -A, --api URL           Override API endpoint (default: metais-test URL).
+      --params PATH       Parameters JSON file (default: params/params.json).
+      --no-csv            Skip conversion from JSON to CSV.
+  -k, --insecure          Allow insecure server connections.
+  -h, -H, --help          Show this help.
 
 Env:
-  TOKEN                   Bearer token (required)
+  TOKEN                   Bearer token (required).
+  SCRIPT_CONTENT          Inline Groovy script body. If set, it overrides -s
+                          and the script file does not need to exist.
 
 Notes:
 - Run the script from the repo directory: $ run/run.sh
-- If page/per-page are omitted, they are not sent in JSON.
-- OUT_JSON is used for the raw API response; OUT_CSV is the convert target.
+- If page/per-page are omitted, they are not sent in the payload.
+- OUT_JSON is the raw API response; OUT_CSV is the convert target.
+- CSV conversion is performed only for TABLE payloads (skipped for RAW).
 EOF
 }
