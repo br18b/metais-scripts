@@ -10,7 +10,7 @@ from typing import Dict, List, Tuple, Any, Optional, Set
 # - "KS_raw"  -> "output/KS_raw.json"
 # - "KS"      -> "output/KS_raw.json"
 # - "output/KS_raw.json" (already a JSON path) -> unchanged
-def resolve_path(token: str) -> str:
+def resolve_path_nod(token: str) -> str:
     token = token.strip()
 
     # If it's already a .json path (absolute or relative), return as-is
@@ -22,7 +22,21 @@ def resolve_path(token: str) -> str:
         token = f"{token}_raw"
 
     # Map to "output/<token>.json"
-    return os.path.join("output", f"{token}.json")
+    return os.path.join("output/nodes", f"{token}.json")
+
+def resolve_path_rel(token: str) -> str:
+    token = token.strip()
+
+    # If it's already a .json path (absolute or relative), return as-is
+    if token.lower().endswith(".json"):
+        return token
+
+    # If user just wrote "KS", automatically interpret it as "KS_raw"
+    if "_" not in token:     # e.g. no underscore — such as "KS", "PO", "AS"
+        token = f"{token}_raw"
+
+    # Map to "output/<token>.json"
+    return os.path.join("output/relations", f"{token}.json")
 
 def load_json(path: str) -> Any:
     with open(path, "r", encoding="utf-8") as f:
@@ -155,8 +169,8 @@ def parse_relation_specs(specs: List[str]) -> List[Tuple[str, str, str]]:
         if len(parts) != 2:
             raise ValueError(f"Relation spec must be 'relationJson,endpointRawJson' but got: {token}")
         rel_tok, raw_tok = parts
-        rel_path = resolve_path(rel_tok)
-        raw_path = resolve_path(raw_tok)
+        rel_path = resolve_path_rel(rel_tok)
+        raw_path = resolve_path_nod(raw_tok)
         title = os.path.splitext(os.path.basename(rel_path))[0]
         parsed.append((title, rel_path, raw_path))
     return parsed
@@ -171,7 +185,7 @@ def main():
     ap.add_argument("relations", nargs="*", help="Zero or more relation specs 'RelationTable,EndpointRaw'")
     args = ap.parse_args()
 
-    central_path = resolve_path(args.central)
+    central_path = resolve_path_nod(args.central)
     if not os.path.exists(central_path):
         raise FileNotFoundError(f"Central file not found: {central_path}")
 
