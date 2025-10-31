@@ -9,8 +9,8 @@ def headers = [
   new Header("Názov projektu rozvoja IT",         Header.Type.STRING),
   new Header("Riešiteľ",                          Header.Type.STRING),
   new Header("Typ investície",                    Header.Type.STRING),
-  //new Header("Obsiahnuté v programe",             Header.Type.STRING), // this one is never used for some odd reason
-  new Header("Financované programom",             Header.Type.STRING),
+  //new Header("Obsiahnutý v programe",             Header.Type.STRING), // this one is never used for some odd reason
+  new Header("Financovaný programom",             Header.Type.STRING),
   new Header("Stav evidencie",                    Header.Type.STRING),
   new Header("Dátum zmeny stavu projektu",        Header.Type.DATE),
   new Header("Kód MetaIS",                        Header.Type.STRING),
@@ -129,8 +129,8 @@ for (row in res.data) {
 
     // fill the table. Use cleaned bits where necessary
     table.add([
-        row.name, riesitel, invest_type,
-        row.program_obs, row.program_fin, stateLabel, dateLabel,
+        row.name, row.riesitel_po, invest_type,
+        row.program_fin, stateLabel, dateLabel,
         row.metais_code, budgetStr
     ])
 }
