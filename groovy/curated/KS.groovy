@@ -68,10 +68,10 @@ def query = withGestor.returns(
 ).orderBy(qi_ks.prop("\$cmdb_lastModifiedAt"), OrderDirection.ASC)
 
 // pagination - only if page and perPage are not null these are applied
-if (perPage && perPage > 0) {
+if (page && perPage && perPage > 0) {
   query = query.limit(perPage)
 }
-if (page && page > 0) {
+if (page && perPage && page > 0) {
   query = query.offset((page - 1) * perPage)
 }
 
@@ -84,6 +84,8 @@ def table = new Report(headers)
 // traverse the data and create the table row-by-row
 for (row in res.data) {
     // convert the machine codes to human-readable using enums
+    // def service_type = (service_type != null) ? enumKSType[row.service_type] : ""; // sanitize
+    // def e_level = (e_level != null) ? enumLevel[row.e_level] : ""; // sanitize
     def service_type = enumKSType[row.service_type];
     def e_level = enumLevel[row.e_level];
 
