@@ -2,67 +2,250 @@
 import subprocess
 import time
 import sys
+import os, re, requests
 
-# Hardcoded central → list of (OUTER, RELATION_NAME)
-RELATIONS = {
-    "KS": [("PO", "je_gestor"), ("Projekt", "realizuje"), ("BP", "realizuje"), ("KS", "sluzi"), ("KS", "prenajima"), ("OE", "ma"),
-           ("Kanal", "spristupnuje"), ("AS", "sluzi"), ("ZS", "zoskupuje"), ("PZS", "zoskupuje"), ("Formular", "riesi"), ("PO", "je_poskytovatelom")],
-    "AS": [("Projekt", "realizuje"), ("AS", "sluzi"), ("PO", "je_spravca"), ("PO", "je_prevadzkovatel"),
-           ("ReferenceRegister", "usedBy"), ("AS", "prenajima"), ("InfraSluzba", "realizuje"), ("ISVS", "realizuje")],
-    "ISVS": [("ISVS", "patri_pod"), ("InfraSluzba", "prevadzkuje"), ("PO", "je_spravca"), ("KRIS", "rozvija"),
-             ("PO", "je_prevadzkovatel"), ("AS", "sluzi"), ("Projekt", "realizuje")],
-    "Projekt": [("Program", "financuje"), ("Projekt", "asociuje", "Projekt_je_asociovany_s_projektom"), ("Program", "obsahuje"), ("PO", "asociuje")],
-    "InfraSluzba": [("Projekt", "realizuje")],
-    "ZS": [("PO", "je_partner")],
+CITYPES_URL = os.getenv("METAIS_TYPES_URL",
+    "https://metais-test.slovensko.sk/api/types-repo/citypes/list")
+REL_TYPES_URL = os.getenv("METAIS_REL_URL",
+    "https://metais-test.slovensko.sk/api/types-repo/relationshiptypes/list")
+
+# Include only application-level stuff by default (skip 'system' types).
+INCLUDE_NODE_TYPES = set(os.getenv("METAIS_INCLUDE_NODE_TYPES", "application").split(","))
+INCLUDE_REL_TYPES  = set(os.getenv("METAIS_INCLUDE_REL_TYPES", "application").split(","))
+
+# Skip invalid=false relationship types
+ONLY_VALID = os.getenv("METAIS_ONLY_VALID", "1") not in ("0", "false", "False", "no", "n")
+
+# Known irregular technicalName → (central, verb, outer)
+# You can extend this list as you find more weird names.
+KNOWN_OVERRIDES = {
+    "Projekt_je_asociovany_s_projektom": ("Projekt", "asociuje", "Projekt"),
 }
 
-MAX_RETRIES = 10
-RETRY_DELAY = 1.0  # seconds
+# A small helper to allow/deny relations by regex on technicalName (optional)
+INCLUDE_REGEX = os.getenv("METAIS_REL_INCLUDE_REGEX", "")  # e.g. r"^(AS|KS|Projekt)_"
+EXCLUDE_REGEX = os.getenv("METAIS_REL_EXCLUDE_REGEX", r"^(CMDB_|LATEST_REQUEST|PREVIOUS_REQUEST)$")
 
-def run_relation(central: str, outer: str, rel: str, reltype_override: str | None = None) -> None:
-    if reltype_override:
-        cmd = f"run/relation.sh {central} {outer} {rel} {reltype_override} --no-csv"
-        label = f"{central}_{rel}_{outer} [{reltype_override}]"
+# Runner + retries
+RAW_CMD = os.getenv("METAIS_REL_CMD", "run/relation.sh {central} {outer} {verb} {override} --no-csv")
+MAX_RETRIES = int(os.getenv("METAIS_MAX_RETRIES", "10"))
+RETRY_DELAY = float(os.getenv("METAIS_RETRY_DELAY", "0.25"))
+TIMEOUT = float(os.getenv("METAIS_FETCH_TIMEOUT", "25"))
+
+# -----------------------------------------------------------------------
+
+
+def fetch_json(url: str):
+    r = requests.get(url, timeout=TIMEOUT, headers={"Accept": "application/json"})
+    r.raise_for_status()
+    data = r.json()
+    return data.get("results", [])
+
+
+def build_node_set(citypes):
+    nodes = set()
+    for it in citypes:
+        typ = (it.get("type") or "").lower()
+        if INCLUDE_NODE_TYPES and typ not in INCLUDE_NODE_TYPES:
+            continue
+        if ONLY_VALID and not it.get("valid", True):
+            continue
+        name = it.get("technicalName") or it.get("name")
+        if name:
+            nodes.add(name)
+    return nodes
+
+
+def tokenize(tn: str):
+    # Split on underscores; keep case as-is for node matches
+    parts = tn.split("_")
+    # Strip empty parts, normalize accidental spaces
+    return [p.strip() for p in parts if p.strip()]
+
+
+def infer_triplet(tn: str, node_set: set[str]):
+    """
+    Try to infer (central, verb, outer) from technicalName like 'Projekt_realizuje_AS'.
+    If irregular, consult KNOWN_OVERRIDES. If still unknown, return None.
+    """
+    if tn in KNOWN_OVERRIDES:
+        c, v, o = KNOWN_OVERRIDES[tn]
+        return c, v, o, True  # override flag True
+
+    parts = tokenize(tn)
+    if len(parts) < 3:
+        return None
+
+    # Heuristic 1: exact head/tail node names
+    head, tail = parts[0], parts[-1]
+    if head in node_set and tail in node_set:
+        verb = "_".join(parts[1:-1])
+        return head, verb, tail, False
+
+    # Heuristic 2: case-insensitive tail with common Slovak endings stripped (e.g., 'projektom' → 'Projekt')
+    # Only attempt if head is a known node.
+    if head in node_set:
+        raw_tail = parts[-1]
+        # try to desuffix (very light heuristic)
+        endings = ("om", "em", "am", "om", "u", "a", "y", "i", "e", "ou", "ov", "om")
+        base = raw_tail
+        for suf in endings:
+            if base.lower().endswith(suf):
+                base = base[:-len(suf)]
+                break
+        # Try capitalized base
+        cap = base[:1].upper() + base[1:]
+        if cap in node_set:
+            verb = "_".join(parts[1:-1])
+            # irregular name → use override (the exact technicalName)
+            return head, verb, cap, True
+
+    return None
+
+
+def build_rel_specs(reltypes, node_set):
+    include_re = re.compile(INCLUDE_REGEX) if INCLUDE_REGEX else None
+    exclude_re = re.compile(EXCLUDE_REGEX) if EXCLUDE_REGEX else None
+
+    specs = []  # list of dicts: {central, verb, outer, override (or "") , tech}
+    for it in reltypes:
+        typ = (it.get("type") or "").lower()
+        if INCLUDE_REL_TYPES and typ not in INCLUDE_REL_TYPES:
+            continue
+        if ONLY_VALID and not it.get("valid", True):
+            continue
+
+        tech = it.get("technicalName")
+        if not tech:
+            continue
+
+        if include_re and not include_re.search(tech):
+            continue
+        if exclude_re and exclude_re.search(tech):
+            continue
+
+        inf = infer_triplet(tech, node_set)
+        if not inf:
+            continue
+
+        central, verb, outer, needs_override = inf
+
+        # 🔁 Flip central <-> outer (e.g., KS_je_gestor_PO -> central=PO, outer=KS)
+        central, outer = outer, central
+
+        # If the canonical pattern equals the tech name, no override needed
+        canonical = f"{central}_{verb}_{outer}"
+        override = tech if (needs_override or canonical != tech) else ""
+
+        specs.append({
+            "central": central,
+            "verb": verb,
+            "outer": outer,
+            "override": override,
+            "tech": tech,
+        })
+
+    specs.sort(key=lambda s: (s["central"], s["verb"], s["outer"], s["tech"]))
+    return specs
+
+
+def run_one(spec, idx, total):
+    central, verb, outer, override = spec["central"], spec["verb"], spec["outer"], spec["override"]
+    label = f"{central}_{verb}_{outer}" + (f" [{override}]" if override else "")
+
+    # Build command; remove the {override} arg if empty so we don't pass a dangling word
+    if override:
+        cmd = RAW_CMD.format(central=central, outer=outer, verb=verb, override=override)
     else:
-        cmd = f"run/relation.sh {central} {outer} {rel} --no-csv"
-        label = f"{central}_{rel}_{outer}"
+        cmd = RAW_CMD.replace("{override} ", "").format(central=central, outer=outer, verb=verb, override="")
 
-    print(f"  -> Generating relation {central} <--({rel})-- {outer}" + (f" (override={reltype_override})" if reltype_override else ""))
-
+    print(f"\n=== Generating relation {central} <--({verb})-- {outer}  ({idx}/{total}) ===")
     attempt = 1
     while attempt <= MAX_RETRIES:
         try:
-            subprocess.run(cmd, shell=True, check=True, text=True)
-            print(f"[OK] {label} completed")
-            return
-        except subprocess.CalledProcessError:
-            print(f"[WARN] Failed attempt {attempt}/{MAX_RETRIES} for {label}, retrying in {RETRY_DELAY}s...")
+            proc = subprocess.run(
+                cmd,
+                shell=True,
+                text=True,
+                check=True,
+                capture_output=True,
+            )
+            # Echo stdout, and append (done x/y) after any "Wrote:" line.
+            for line in proc.stdout.splitlines():
+                if line.startswith("Wrote:"):
+                    print(f"{line} (done {idx}/{total})")
+                else:
+                    print(line)
+            print(f"[OK] {label}")
+            return True
+        except subprocess.CalledProcessError as e:
+            print(f"[WARN] {label}: attempt {attempt}/{MAX_RETRIES} failed. Retrying in {RETRY_DELAY}s...")
+            if e.stdout:
+                for line in e.stdout.splitlines():
+                    print(line)
+            if e.stderr:
+                for line in e.stderr.splitlines():
+                    print(line)
             time.sleep(RETRY_DELAY)
             attempt += 1
 
     print(f"[ERROR] Giving up on {label}")
+    return False
+
+
+def group_by_central(specs):
+    by_central = {}
+    for s in specs:
+        by_central.setdefault(s["central"], []).append(s)
+    return by_central
 
 
 def main():
-    if len(sys.argv) < 2:
-        print("Usage: python3 raw_relations.py <CENTRAL_NODE>")
-        print("Example: python3 raw_relations.py KS")
+    # Fetch node types and relationship types
+    try:
+        citypes = fetch_json(CITYPES_URL)
+        node_set = build_node_set(citypes)
+    except Exception as e:
+        print(f"[ERROR] Failed to fetch or parse node types: {e}", file=sys.stderr)
         sys.exit(1)
 
-    central = sys.argv[1]
-    if central not in RELATIONS:
-        print(f"[ERROR] No relations defined for central node '{central}'")
+    try:
+        reltypes = fetch_json(REL_TYPES_URL)
+    except Exception as e:
+        print(f"[ERROR] Failed to fetch relationship types: {e}", file=sys.stderr)
         sys.exit(1)
 
-    for spec in RELATIONS[central]:
-        if len(spec) == 2:
-            outer, rel = spec
-            run_relation(central, outer, rel)
-        elif len(spec) == 3:
-            outer, rel, reltype_override = spec
-            run_relation(central, outer, rel, reltype_override)
-        else:
-            print(f"[ERROR] Bad relation spec for {central}: {spec} (expected 2 or 3 items)")
+    specs = build_rel_specs(reltypes, node_set)
+    if not specs:
+        print("[ERROR] No usable relationship types after filtering/inference.", file=sys.stderr)
+        sys.exit(1)
+
+    by_central = group_by_central(specs)
+
+    # If user specified a central node: limit set
+    arg_central = None
+    if len(sys.argv) >= 2:
+        arg_central = sys.argv[1].strip()
+        if arg_central.lower() not in ("", "all", "*"):
+            if arg_central not in by_central:
+                avail = ", ".join(sorted(by_central.keys()))
+                print(f"[ERROR] No inferred relations for central '{arg_central}'. Available: {avail}", file=sys.stderr)
+                sys.exit(1)
+            # reduce to one central
+            specs = by_central[arg_central]
+
+    total = len(specs)
+    print(f"[INFO] Will process {total} relations"
+          + (f" for central '{arg_central}'" if arg_central and arg_central.lower() not in ("all", "*") else "")
+          + ".")
+
+    failures = 0
+    for i, spec in enumerate(specs, start=1):
+        ok = run_one(spec, i, total)
+        if not ok:
+            failures += 1
+
+    print(f"\n[INFO] Completed: {total - failures} ok / {failures} failed.")
 
 
 if __name__ == "__main__":
