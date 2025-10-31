@@ -1,0 +1,6 @@
+{
+    "inclKS": true,
+    "inclAS": true,
+    "inclZS": true,
+    "ignoreTrivialMatches": true
+}
