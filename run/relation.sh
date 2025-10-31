@@ -47,4 +47,4 @@ SCRIPT_CONTENT="$(
 )"
 
 export SCRIPT_CONTENT
-run/run.sh -o "$report_base" --no-csv "$@"
+run/run.sh -o "$report_base" --no-csv --outdir output/relations "$@"
